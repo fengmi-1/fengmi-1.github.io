@@ -1,0 +1,525 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小组汇报匿名打分系统（实时同步版）</title>
+    <!-- 引入LeanCloud SDK -->
+    <script src="https://unpkg.com/leancloud-storage@4.0.0/dist/av-min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft Yahei", sans-serif;
+        }
+
+        body {
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        .config-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .config-item {
+            margin-bottom: 10px;
+        }
+
+            .config-item label {
+                display: inline-block;
+                width: 100px;
+            }
+
+            .config-item input {
+                width: 60px;
+                height: 30px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                text-align: center;
+            }
+
+        .score-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+            background-color: #fff;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+            .score-table th, .score-table td {
+                border: 1px solid #ddd;
+                padding: 12px 15px;
+                text-align: center;
+            }
+
+            .score-table th {
+                background-color: #e6f2ff;
+                font-weight: 600;
+            }
+
+        .title-input {
+            width: 80px;
+            height: 30px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .score-input {
+            width: 60px;
+            height: 30px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+            .score-input.error {
+                border-color: #f56c6c;
+            }
+
+        .btn-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background-color: #409eff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+
+            .btn:hover {
+                background-color: #66b1ff;
+            }
+
+        .hidden {
+            display: none;
+        }
+
+        .avg-section {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+            .avg-section h2 {
+                text-align: center;
+                color: #333;
+                margin-bottom: 20px;
+            }
+
+        .avg-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+            .avg-table th {
+                background-color: #f0f7ff;
+            }
+
+            .avg-table th, .avg-table td {
+                border: 1px solid #ddd;
+                padding: 10px 15px;
+                text-align: center;
+            }
+
+        .sync-status {
+            text-align: center;
+            color: #67c23a;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>小组汇报匿名打分系统</h1>
+    <div class="sync-status">已连接到云端，数据实时同步中...</div>
+
+    <div class="config-section">
+        <h3>打分列数配置</h3>
+        <div class="config-item">
+            <label>自评列数：</label>
+            <input type="number" id="self-column-count" min="1" value="1">
+        </div>
+        <div class="config-item">
+            <label>互评列数：</label>
+            <input type="number" id="peer-column-count" min="1" value="1">
+        </div>
+        <button class="btn" id="generate-table-btn">生成打分表格</button>
+    </div>
+
+    <div id="score-section" class="hidden">
+        <table class="score-table" id="score-table">
+            <!-- 表格内容由JS动态生成 -->
+        </table>
+
+        <div class="btn-container">
+            <button class="btn" id="submit-score-btn">提交打分（匿名）</button>
+            <button class="btn" id="calc-avg-btn">计算平均分</button>
+            <button class="btn" id="export-data-btn">导出数据</button>
+        </div>
+
+        <div id="avg-section" class="avg-section hidden">
+            <h2>平均分统计结果</h2>
+            <table class="avg-table">
+                <thead>
+                    <tr>
+                        <th>师评平均分</th>
+                        <th>自评平均分</th>
+                        <th>互评平均分</th>
+                        <th>总平均分</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td id="teacher-avg">0.00</td>
+                        <td id="self-avg">0.00</td>
+                        <td id="peer-avg">0.00</td>
+                        <td id="total-avg">0.00</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // ====================== LeanCloud 初始化配置（请替换为你的信息） ======================
+        AV.init({
+            appId: "6sTkv0sCz49rAuhcRa7E6Iz6-gzGzoHsz",  // 替换为LeanCloud控制台的App ID
+            appKey: "ot0FNBmMFj8fc1yCJctfCyoH",  // 替换为LeanCloud控制台的App Key
+            serverURL: "2lxHAZECzHWorSkxJDixaWJf"  // 替换为LeanCloud控制台的Server URL（如https://xxx.lc-cn-n1-shared.com）
+        });
+        // 定义云端数据表（自动创建）
+        const ScoreRecord = AV.Object.extend('ScoreRecord');
+        const scoreQuery = new AV.Query('ScoreRecord');
+        // ==================================================================================
+
+        let selfColumnCount = 1;
+        let peerColumnCount = 1;
+        let scoreInputs = [];
+        let scoresData = [];  // 本地缓存的云端数据
+
+        // 初始化：从云端加载已有数据并监听实时变化
+        function initCloudData() {
+            // 加载历史数据
+            loadCloudScores();
+            // 监听新数据提交，实时同步
+            const subscription = scoreQuery.subscribe();
+            subscription.on('create', () => {
+                loadCloudScores();  // 有新数据时重新加载
+            });
+        }
+
+        // 从云端加载所有打分数据
+        function loadCloudScores() {
+            scoreQuery.find().then(records => {
+                scoresData = records.map(record => ({
+                    teacher: record.get('teacher'),
+                    self: record.get('self'),
+                    peer: record.get('peer'),
+                    createdAt: record.get('createdAt')
+                }));
+                console.log('云端数据同步完成，共', scoresData.length, '条记录');
+            }).catch(error => {
+                console.error('加载云端数据失败：', error);
+                alert('数据同步失败，请检查网络或LeanCloud配置');
+            });
+        }
+
+        // 生成打分表格
+        document.getElementById('generate-table-btn').addEventListener('click', () => {
+            selfColumnCount = parseInt(document.getElementById('self-column-count').value) || 1;
+            peerColumnCount = parseInt(document.getElementById('peer-column-count').value) || 1;
+
+            const table = document.getElementById('score-table');
+            table.innerHTML = '';
+
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            headerRow.appendChild(createTh('评价指标'));
+            headerRow.appendChild(createTh('师评'));
+
+            for (let i = 1; i <= selfColumnCount; i++) {
+                const selfTh = document.createElement('th');
+                const titleInput = createTitleInput(`自评${i}`);
+                selfTh.appendChild(titleInput);
+                headerRow.appendChild(selfTh);
+            }
+
+            for (let i = 1; i <= peerColumnCount; i++) {
+                const peerTh = document.createElement('th');
+                const titleInput = createTitleInput(`互评${i}`);
+                peerTh.appendChild(titleInput);
+                headerRow.appendChild(peerTh);
+            }
+
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            const indicators = [
+                { name: '参与程度', weight: 20 },
+                { name: '合作情况', weight: 20 },
+                { name: '创新程度', weight: 20 },
+                { name: '学习态度', weight: 20 },
+                { name: '情感态度价值观', weight: 20 }
+            ];
+
+            indicators.forEach((indicator, idx) => {
+                const row = document.createElement('tr');
+                row.appendChild(createTd(`${idx + 1}. ${indicator.name}（${indicator.weight}分）`));
+                row.appendChild(createScoreTd());
+
+                for (let i = 0; i < selfColumnCount; i++) {
+                    row.appendChild(createScoreTd());
+                }
+
+                for (let i = 0; i < peerColumnCount; i++) {
+                    row.appendChild(createScoreTd());
+                }
+
+                tbody.appendChild(row);
+            });
+
+            const totalRow = document.createElement('tr');
+            totalRow.appendChild(createTd('<strong>总分</strong>'));
+            totalRow.appendChild(createTd('', 'teacher-total'));
+
+            for (let i = 1; i <= selfColumnCount; i++) {
+                totalRow.appendChild(createTd('', `self-total-${i}`));
+            }
+            for (let i = 1; i <= peerColumnCount; i++) {
+                totalRow.appendChild(createTd('', `peer-total-${i}`));
+            }
+
+            tbody.appendChild(totalRow);
+            table.appendChild(tbody);
+
+            scoreInputs = document.querySelectorAll('.score-input');
+            scoreInputs.forEach(input => {
+                input.addEventListener('input', handleScoreInput);
+                input.addEventListener('blur', validateScore);
+            });
+
+            document.getElementById('score-section').classList.remove('hidden');
+        });
+
+        // 分数输入处理
+        function handleScoreInput() {
+            validateScore(this);
+            calculateTotal();
+        }
+
+        // 分数验证（0-20分）
+        function validateScore(input) {
+            const value = parseInt(input.value) || 0;
+            if (value < 0) {
+                input.classList.add('error');
+                alert('分数不能为负数，请重新输入！');
+                input.value = '';
+            } else if (value > 20) {
+                input.classList.add('error');
+                alert('分数不能超过20分，请重新输入！');
+                input.value = '';
+            } else {
+                input.classList.remove('error');
+            }
+        }
+
+        // 计算总分
+        function calculateTotal() {
+            let teacherTotal = 0;
+            const selfTotals = new Array(selfColumnCount).fill(0);
+            const peerTotals = new Array(peerColumnCount).fill(0);
+
+            scoreInputs.forEach((input, index) => {
+                const value = parseInt(input.value) || 0;
+                const colIndex = index % (1 + selfColumnCount + peerColumnCount);
+
+                if (colIndex === 0) {
+                    teacherTotal += value;
+                } else if (colIndex <= selfColumnCount) {
+                    selfTotals[colIndex - 1] += value;
+                } else {
+                    peerTotals[colIndex - selfColumnCount - 1] += value;
+                }
+            });
+
+            document.getElementById('teacher-total').textContent = teacherTotal;
+            for (let i = 1; i <= selfColumnCount; i++) {
+                document.getElementById(`self-total-${i}`).textContent = selfTotals[i - 1];
+            }
+            for (let i = 1; i <= peerColumnCount; i++) {
+                document.getElementById(`peer-total-${i}`).textContent = peerTotals[i - 1];
+            }
+        }
+
+        // 提交打分到云端
+        document.getElementById('submit-score-btn').addEventListener('click', () => {
+            let isValid = true;
+            scoreInputs.forEach(input => {
+                const value = parseInt(input.value) || 0;
+                if (value < 0 || value > 20 || isNaN(value)) {
+                    isValid = false;
+                    input.classList.add('error');
+                }
+            });
+
+            if (!isValid) {
+                alert('存在无效分数（需在0-20分之间），请修正后提交！');
+                return;
+            }
+
+            // 获取当前打分数据
+            const teacherTotal = parseInt(document.getElementById('teacher-total').textContent);
+            const selfTotals = [];
+            const peerTotals = [];
+
+            for (let i = 1; i <= selfColumnCount; i++) {
+                selfTotals.push(parseInt(document.getElementById(`self-total-${i}`).textContent));
+            }
+            for (let i = 1; i <= peerColumnCount; i++) {
+                peerTotals.push(parseInt(document.getElementById(`peer-total-${i}`).textContent));
+            }
+
+            // 保存到云端
+            const newRecord = new ScoreRecord();
+            newRecord.set('teacher', teacherTotal);
+            newRecord.set('self', selfTotals);
+            newRecord.set('peer', peerTotals);
+            newRecord.save().then(() => {
+                alert('打分已匿名提交到云端，所有人可实时查看！');
+                // 清空当前输入（可选）
+                scoreInputs.forEach(input => input.value = '');
+                calculateTotal();
+            }).catch(error => {
+                console.error('提交失败：', error);
+                alert('提交失败，请检查网络或LeanCloud配置');
+            });
+        });
+
+        // 计算平均分（基于云端数据）
+        document.getElementById('calc-avg-btn').addEventListener('click', () => {
+            if (scoresData.length === 0) {
+                alert('暂无云端打分数据，请先提交打分！');
+                return;
+            }
+
+            let totalTeacher = 0, totalSelf = 0, totalPeer = 0;
+            const selfColumnTotal = selfColumnCount * scoresData.length;
+            const peerColumnTotal = peerColumnCount * scoresData.length;
+
+            scoresData.forEach(data => {
+                totalTeacher += data.teacher;
+                data.self.forEach(score => totalSelf += score);
+                data.peer.forEach(score => totalPeer += score);
+            });
+
+            const teacherAvg = (totalTeacher / scoresData.length).toFixed(2);
+            const selfAvg = (totalSelf / selfColumnTotal).toFixed(2);
+            const peerAvg = (totalPeer / peerColumnTotal).toFixed(2);
+            const totalAvg = ((totalTeacher + totalSelf + totalPeer) / (scoresData.length + selfColumnTotal + peerColumnTotal)).toFixed(2);
+
+            document.getElementById('teacher-avg').textContent = teacherAvg;
+            document.getElementById('self-avg').textContent = selfAvg;
+            document.getElementById('peer-avg').textContent = peerAvg;
+            document.getElementById('total-avg').textContent = totalAvg;
+
+            document.getElementById('avg-section').classList.remove('hidden');
+        });
+
+        // 导出云端数据
+        document.getElementById('export-data-btn').addEventListener('click', () => {
+            if (scoresData.length === 0) {
+                alert('暂无云端数据可导出！');
+                return;
+            }
+
+            // 格式化数据（包含时间戳）
+            const exportData = scoresData.map((data, index) => ({
+                序号: index + 1,
+                提交时间: data.createdAt ? data.createdAt.toLocaleString() : '未知',
+                师评总分: data.teacher,
+                自评总分: data.self.join(','),
+                互评总分: data.peer.join(',')
+            }));
+
+            const dataStr = JSON.stringify(exportData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `小组打分数据_${new Date().toLocaleDateString()}.json`;
+            link.click();
+
+            alert('云端数据已导出为JSON文件');
+        });
+
+        // 快捷键支持
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                document.getElementById('submit-score-btn').click();
+            }
+            if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+                document.getElementById('calc-avg-btn').click();
+            }
+        });
+
+        // 工具函数
+        function createTh(text) {
+            const th = document.createElement('th');
+            th.textContent = text;
+            return th;
+        }
+
+        function createTd(content, id = '') {
+            const td = document.createElement('td');
+            td.innerHTML = content;
+            if (id) td.id = id;
+            return td;
+        }
+
+        function createTitleInput(defaultValue) {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'title-input';
+            input.value = defaultValue;
+            return input;
+        }
+
+        function createScoreTd() {
+            const td = document.createElement('td');
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'score-input';
+            input.min = "0";
+            input.max = "20";
+            input.value = '';
+            td.appendChild(input);
+            return td;
+        }
+
+        // 页面加载完成后初始化云端数据
+        window.onload = initCloudData;
+    </script>
+</body>
+</html>
